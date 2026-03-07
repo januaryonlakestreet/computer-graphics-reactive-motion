@@ -18,58 +18,8 @@ import torch.optim as optim
 
 from utils.render import *
 from utils.utils import breakup_tensor
-from torch.cuda.amp import GradScaler
 
 
-def interaction_contact_labels(positions_a,positions_b,thres= 0.00001):
-    return torch.from_numpy((positions_a-positions_b < thres).astype(np.float32))
-
-
-def generate_contact_labels(side_a,side_b):
-    return interaction_contact_labels(np.array(side_a[:,:,3:69].detach().cpu()),np.array(side_b[:,:,3:69].detach().cpu())).to('cuda')
-
-
-def foot_detect(positions, thres=0.1):
-    fid_l = [7, 10]
-    fid_r = [8, 11]
-    velfactor, heightfactor = (torch.from_numpy(np.array([thres, thres])).to('cuda'),
-                               torch.from_numpy(np.array([0.1, 0.05])).to('cuda'))
-
-    feet_l_x = (positions[1:, fid_l, 0] - positions[:-1, fid_l, 0]) ** 2
-    feet_l_y = (positions[1:, fid_l, 1] - positions[:-1, fid_l, 1]) ** 2
-    feet_l_z = (positions[1:, fid_l, 2] - positions[:-1, fid_l, 2]) ** 2
-    feet_l_h = positions[:-1, fid_l, 1]
-    feet_l = (((feet_l_x + feet_l_y + feet_l_z) < velfactor) & (feet_l_h < heightfactor)).float()
-
-    feet_r_x = (positions[1:, fid_r, 0] - positions[:-1, fid_r, 0]) ** 2
-    feet_r_y = (positions[1:, fid_r, 1] - positions[:-1, fid_r, 1]) ** 2
-    feet_r_z = (positions[1:, fid_r, 2] - positions[:-1, fid_r, 2]) ** 2
-    feet_r_h = positions[:-1, fid_r, 1]
-    feet_r = (((feet_r_x + feet_r_y + feet_r_z) < velfactor) & (feet_r_h < heightfactor)).float()
-    return torch.cat((torch.zeros(1,2).to('cuda'),feet_l)), torch.cat((torch.zeros(1,2).to('cuda'),feet_r))
-
-def CalculateFootLoss(real_side_b,fake_side_b):
-
-    real_fc_labels = real_side_b[:,:,-70:-66].squeeze()
-    fake_joints = fake_side_b[:,:,3:69].squeeze().reshape(-1,22,3)
-
-    fake_fc_labels_l,fake_fc_labels_r = foot_detect(fake_joints, 0.00001)
-    fake_fc_labels = torch.concatenate((fake_fc_labels_l,fake_fc_labels_l),dim=1)
-
-    fc_loss = torch.nn.MSELoss()(real_fc_labels,fake_fc_labels)
-
-    return fc_loss
-
-
-
-def CalculateInteractionLabelLoss(side_a,real_b,fake_b):
-    side_a_i_labels = side_a[:,:,-66:]
-    real_b_i_labels = real_b[:,:,-66:]
-
-    fake_b_i_labels = generate_contact_labels(side_a,fake_b)
-
-    loss = torch.nn.MSELoss()(real_b_i_labels,fake_b_i_labels)
-    return loss
 
 
 def collect_history(a,b,data):
@@ -135,16 +85,21 @@ def main():
         rollout_loss = torch.tensor(0.0).to(args.device)
         pose_vae.optim.zero_grad()
 
-        batch_raw = mocap_data["side_a"]
-        batch = batch_raw[sampler].unsqueeze(dim=1)
-        target = mocap_data["side_b"][sampler].unsqueeze(dim=1)
-        batch_history = collect_history(sampler, sampler_history, batch_raw)
+        batch_raw_a = mocap_data["side_a"]
+        batch_a = batch_raw_a[sampler].unsqueeze(dim=1)
+        target_a = mocap_data["side_b"][sampler].unsqueeze(dim=1)
+        batch_history_a = collect_history(sampler, sampler_history, batch_raw_a)
 
-        reconstructed_motion, results_dict = pose_vae(batch, batch_history)
+        batch_raw_b = mocap_data["side_b"]
+        batch_b = batch_raw_b[sampler].unsqueeze(dim=1)
+        target_b = mocap_data["side_a"][sampler].unsqueeze(dim=1)
+        batch_history_b = collect_history(sampler, sampler_history, batch_raw_b)
+
+        reconstructed_motion, results_dict = pose_vae(batch_history_a)
 
 
 
-        recon_loss = F.mse_loss(target,reconstructed_motion)
+        recon_loss = F.mse_loss(batch_a,reconstructed_motion)
 
         kl = kl_loss(results_dict["mean"], results_dict["log_var"])
         rollout_loss += recon_loss + kl
@@ -154,18 +109,18 @@ def main():
 
         if ep > 5 and ep % 100 == 0:
             print(f"{ep}    {rollout_loss.item():.6f}")
-            device = 'cuda'
+
 
             mocap_data =  Get_Interaction(args).Get_Interaction()
             real_side = mocap_data["side_a"]
             sequence_length = real_side.shape[0]
 
-            generated_side_b = mocap_data["side_b"][:history_length,:]
+            generated_side_b = mocap_data["side_a"][:history_length,:]
 
             for frame in range(history_length,sequence_length):
                 batch = real_side[frame, :].unsqueeze(0).unsqueeze(0)
-                history = real_side[frame-history_length:frame,:].unsqueeze(0)
-                new_side_b, _ = pose_vae(batch, history)
+                history = mocap_data["side_a"][frame-history_length:frame,:].unsqueeze(0)
+                new_side_b, _ = pose_vae(history)
                 generated_side_b = torch.vstack((generated_side_b,new_side_b.squeeze().unsqueeze(0)))
 
             side_a = Get_Interaction(args).denormalize_a(real_side)

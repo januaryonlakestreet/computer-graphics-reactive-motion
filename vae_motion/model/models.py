@@ -299,7 +299,8 @@ class DartVAE(nn.Module):
         motion = self.motion_decoder(z,motion_history)
         return motion
 
-    def forward(self, current_pose,motion_history):
+    def forward(self,motion_history):
+        current_pose = motion_history[:,-1:,:]
         results_dict = self.encode(current_pose)
         z = self.reparameterize(results_dict["mean"], results_dict["log_var"])
         reconstructed_motion = self.decode(z,motion_history)
