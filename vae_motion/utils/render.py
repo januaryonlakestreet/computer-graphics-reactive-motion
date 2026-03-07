@@ -5,7 +5,7 @@ from mpl_toolkits.mplot3d import Axes3D
 import numpy as np
 import imageio
 import torch
-#from viewer.object import floor, camera, light
+from utils.obects import floor, camera, light
 def save_mesh_render_gif(sequence,faces,filename="mesh.gif",colour=[0.7,0.7,0.7,1.0]):
     B =sequence.shape[0]
     frames = []
@@ -55,7 +55,7 @@ def save_mesh_render(vertices, faces, filename="mesh.png", color=[0.7, 0.7, 0.7,
     pose = T @ R
 
     scene.add(camera, pose=pose)
-    #floor(scene, "utils/floor.png")
+    floor(scene, "utils/floor.png")
 
 
     r = pyrender.OffscreenRenderer(viewport_width=640, viewport_height=480)

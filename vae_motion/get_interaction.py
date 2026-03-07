@@ -3,71 +3,111 @@ import torch
 import glob
 import random
 import os
+
 class Get_Interaction:
     def __init__(self,args):
         self.args = args
         self.future_length = args.future_length
         self.history_length = args.history_length
 
-    def create_motion_primitives(self, motion_sequence, history_length=None, future_length=None):
+    def collect_data(self,data):
+        transl = torch.from_numpy(data["trans"])
+        orient = torch.from_numpy(data["root_orient"])
+        pose = torch.from_numpy(data["pose_body"])
+        return torch.cat((transl,orient,pose),dim=1).to(self.args.device)
 
-        motion_primitives = []
-        total_frames = motion_sequence.shape[0]
 
-        # Iterate through the sequence to create primitives
-        start_index = 0
-        while start_index + history_length + future_length <= total_frames:
-            history = motion_sequence[start_index:start_index + history_length]
-            future = motion_sequence[start_index + history_length:start_index + history_length + future_length]
-            motion_primitives.append((history, future))
-            start_index += future_length
 
-        # Handle the case where there might be a remaining partial sequence
-        if total_frames - start_index > history_length:
-            history = motion_sequence[start_index:start_index + history_length]
-            future = motion_sequence[start_index + history_length:]
-            # motion_primitives.append((history, future))
+    def denormalize_a(self, data):
+        dir = os.path.dirname(os.path.dirname(os.getcwd())) + "\\computer & graphics two char motion\\interaction_dataset_files\\"
+        loaded_stats = torch.load(dir + "\\stats.pt")
 
-        return motion_primitives
+        loaded_stats_a = loaded_stats["a"]
+        avg_a = torch.cat((
+            loaded_stats_a["transl"]["mean"],
+            loaded_stats_a["orient"]["mean"],
+            loaded_stats_a["pose"]["mean"]
+        )).float().to(self.args.device)
+
+        std_a = torch.cat((
+            loaded_stats_a["transl"]["std"],
+            loaded_stats_a["orient"]["std"],
+            loaded_stats_a["pose"]["std"]
+        )).float().to(self.args.device)
+
+        std_a[std_a == 0] = 1.0
+
+        denormed_mocap_data = data * std_a + avg_a
+        return denormed_mocap_data
+
+    def denormalize_b(self, data):
+        dir = os.path.dirname(os.path.dirname(os.getcwd())) + "\\computer & graphics two char motion\\interaction_dataset_files\\"
+        loaded_stats = torch.load(dir + "\\stats.pt")
+
+        loaded_stats_b = loaded_stats["b"]
+        avg_b = torch.cat((
+            loaded_stats_b["transl"]["mean"],
+            loaded_stats_b["orient"]["mean"],
+            loaded_stats_b["pose"]["mean"]
+        )).float().to(self.args.device)
+
+        std_b = torch.cat((
+            loaded_stats_b["transl"]["std"],
+            loaded_stats_b["orient"]["std"],
+            loaded_stats_b["pose"]["std"]
+        )).float().to(self.args.device)
+
+        std_b[std_b == 0] = 1.0
+
+        denormed_mocap_data = data * std_b + avg_b
+        return denormed_mocap_data
+
 
     def Get_Interaction(self,id=False):
         frame_count = 0
 
         while frame_count < self.args.mini_batch_size:
-            dir = os.path.dirname(os.path.dirname(os.getcwd()))+"\\computer & graphics two char motion\\interaction_dataset\\processed\\"
-            motion_choice = random.choice(glob.glob(dir + "*.npy")[:1])
-            motion_id = motion_choice.split("\\")[-1].split("_")[0]
+            dir = os.path.dirname(os.path.dirname(os.getcwd()))+"\\computer & graphics two char motion\\interaction_dataset_files\\"
+            motion_choice = random.choice(glob.glob(dir + "*.pkl")[:1])
+            motion_id = motion_choice.split("\\")[-1].split("_")[0].split(".")[0]
+
+            loaded_data = np.load(dir+str(motion_id)+".pkl",allow_pickle=True)
+
+            raw_data_1 = loaded_data["person1"]
+            raw_data_2 = loaded_data["person2"]
+
+            mocap_data_1 = self.collect_data(raw_data_1)
+            mocap_data_2 = self.collect_data(raw_data_2)
+
+            loaded_stats = torch.load(dir+"\\stats.pt")
 
 
 
-            raw_data_1 = np.load(dir+str(motion_id)+"_1.npy")
-            raw_data_2 = np.load(dir+str(motion_id)+"_2.npy")
-            mocap_data_1 = torch.from_numpy(raw_data_1).float().to(self.args.device)
-            mocap_data_2 = torch.from_numpy(raw_data_2).float().to(self.args.device)
+            loaded_stats_a = loaded_stats["a"]
+            loaded_stats_b = loaded_stats["b"]
 
-            loaded_stats_a = np.load(dir+"stats\\stats_a.npy",allow_pickle=True).item()
-            loaded_stats_b = np.load(dir+"stats\\stats_b.npy", allow_pickle=True).item()
+            avg_a = torch.cat((loaded_stats_a["transl"]["mean"],loaded_stats_a["orient"]["mean"],
+                               loaded_stats_a["pose"]["mean"])).float().to(self.args.device)
+            std_a = torch.cat((loaded_stats_a["transl"]["std"],loaded_stats_a["orient"]["std"],
+                               loaded_stats_a["pose"]["std"])).float().to(self.args.device)
 
-            avg_a = torch.from_numpy(loaded_stats_a['mean']).float().to(self.args.device)
-            std_a = torch.from_numpy(loaded_stats_a['std']).float().to(self.args.device)
-
-            avg_b = torch.from_numpy(loaded_stats_b['mean']).float().to(self.args.device)
-            std_b = torch.from_numpy(loaded_stats_b['std']).float().to(self.args.device)
+            avg_b = torch.cat((loaded_stats_b["transl"]["mean"], loaded_stats_b["orient"]["mean"],
+                               loaded_stats_b["pose"]["mean"])).float().to(self.args.device)
+            std_b = torch.cat((loaded_stats_b["transl"]["std"], loaded_stats_b["orient"]["std"],
+                               loaded_stats_b["pose"]["std"])).float().to(self.args.device)
 
             std_a[std_a == 0] = 1.0
             std_b[std_b == 0] = 1.0
 
 
-            interaction_contact_label_a = mocap_data_1[:,-70:] # 66 i labels + 4 fc labels
-            interaction_contact_label_b = mocap_data_2[:,-70:]
 
-            mocap_data_1 = (mocap_data_1 - avg_a) / std_a
-            mocap_data_2 = (mocap_data_2 - avg_b) / std_b
 
-            mocap_data_1[:,-70:] = interaction_contact_label_a
-            mocap_data_2[:,-70:] = interaction_contact_label_b
+            normed_mocap_data_1 = (mocap_data_1 - avg_a) / std_a
+            normed_mocap_data_2 = (mocap_data_2 - avg_b) / std_b
+
+
 
             frame_count += mocap_data_1.shape[0]
 
 
-        return {"side_a":mocap_data_1,"side_b":mocap_data_2}
+        return {"side_a":normed_mocap_data_1,"side_b":normed_mocap_data_2}

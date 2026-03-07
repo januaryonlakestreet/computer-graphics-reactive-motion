@@ -17,8 +17,9 @@ from model.models import (
 DartVAE,MotionDiscriminator
 )
 import torch.optim as optim
-from utils.matplotvis import generate_rollout
+
 from utils.render import *
+from utils.utils import breakup_tensor
 from torch.cuda.amp import GradScaler
 
 
@@ -107,7 +108,7 @@ def main():
 
 
     smpl_manager = SMPLManager("smpl/", gender="neutral", device='cuda')
-
+    mesh_renderer = MeshRenderer()
     args.num_epochs = 50000
     args.mini_batch_size = 128
     args.initial_lr = 0.00001
@@ -116,48 +117,13 @@ def main():
 
 
 
-    raw_data_1 = np.load("../interaction_dataset/processed/5883_1.npy")
-    raw_data_2 = np.load("../interaction_dataset/processed/5883_2.npy")
-    mocap_data_1 = torch.from_numpy(raw_data_1).float().to(args.device)
-    mocap_data_2 = torch.from_numpy(raw_data_2).float().to(args.device)
 
-
-
-    loaded_stats_a = np.load("../interaction_dataset/processed/stats/stats_a.npy", allow_pickle=True).item()
-    loaded_stats_b = np.load("../interaction_dataset/processed/stats/stats_b.npy", allow_pickle=True).item()
-
-    avg_a = torch.from_numpy(loaded_stats_a['mean']).float().to(args.device)
-    std_a = torch.from_numpy(loaded_stats_a['std']).float().to(args.device)
-    min_a = torch.from_numpy(loaded_stats_a['min']).float().to(args.device)
-    max_a = torch.from_numpy(loaded_stats_a['max']).float().to(args.device)
-
-    avg_b = torch.from_numpy(loaded_stats_b['mean']).float().to(args.device)
-    std_b = torch.from_numpy(loaded_stats_b['std']).float().to(args.device)
-    min_b = torch.from_numpy(loaded_stats_b['min']).float().to(args.device)
-    max_b = torch.from_numpy(loaded_stats_b['max']).float().to(args.device)
-    std_a[std_a == 0] = 1.0
-    std_b[std_b == 0] = 1.0
-    avg = torch.cat((avg_a, avg_b))
-    std = torch.cat((std_a, std_b))
-    min = torch.cat((min_a, min_b))
-    max = torch.cat((max_a, max_b))
-    # Make sure we don't divide by 0
-    std[std == 0] = 1.0
-
-
-    normalization = {
-        "mode": args.norm_mode,
-        "max": max,
-        "min": min,
-        "avg": avg,
-        "std": std,
-    }
-    frame_size = mocap_data_1.size()[1] * 2
+    frame_size =69 * 2
 
     pose_vae = DartVAE(
             motion_input_size=frame_size,
             motion_output_size=frame_size,
-            normalization=normalization,
+            normalization=None,
             history_length=args.history_length
         ).to(args.device)
 
@@ -178,21 +144,12 @@ def main():
 
         reconstructed_motion, results_dict = pose_vae(batch, batch_history)
 
-        real = pose_vae.denormalize(torch.cat((batch, target), dim=2))
-        fake = pose_vae.denormalize(torch.cat((batch, reconstructed_motion), dim=2))
-
-        side_a = real[:, :, :293]
-        real_b = real[:, :, 293:]
-        fake_b = fake[:, :, 293:]
 
 
-        interaction_label_loss = CalculateInteractionLabelLoss(side_a,real_b,fake_b)
-        fc_loss = CalculateFootLoss(real_b,fake_b)
-
-        recon_loss = torch.nn.MSELoss()(real_b, fake_b)
+        recon_loss = F.mse_loss(target,reconstructed_motion)
 
         kl = kl_loss(results_dict["mean"], results_dict["log_var"])
-        rollout_loss += recon_loss + kl + interaction_label_loss + fc_loss
+        rollout_loss += recon_loss + kl
 
         rollout_loss.backward()
         pose_vae.optim.step()
@@ -200,7 +157,40 @@ def main():
         if ep > 5 and ep % 100 == 0:
             print(f"{ep}    {rollout_loss.item():.6f}")
             device = 'cuda'
-            real_frames, fake_frames = generate_rollout(pose_vae, Get_Interaction, args)
+
+            mocap_data =  Get_Interaction(args).Get_Interaction()
+            real_side = mocap_data["side_a"]
+            sequence_length = real_side.shape[0]
+
+            generated_side_b = mocap_data["side_b"][:history_length,:]
+
+            for frame in range(history_length,sequence_length):
+                batch = real_side[frame, :].unsqueeze(0).unsqueeze(0)
+                history = real_side[frame-history_length:frame,:].unsqueeze(0)
+                new_side_b, _ = pose_vae(batch, history)
+                generated_side_b = torch.vstack((generated_side_b,new_side_b.squeeze().unsqueeze(0)))
+
+            side_a = Get_Interaction(args).denormalize_a(real_side)
+            side_b = Get_Interaction(args).denormalize_b(generated_side_b)
+
+            fake_joints, fake_verts, _ = smpl_manager.smpl_forward(
+                breakup_tensor(side_a)["body_pose"].unsqueeze(0),
+                breakup_tensor(side_a)["global_orient"].unsqueeze(0),
+                breakup_tensor(side_a)["transl"].unsqueeze(0),
+            )
+            real_joints, real_verts, _ = smpl_manager.smpl_forward(
+                breakup_tensor(side_b)["body_pose"].unsqueeze(0),
+                breakup_tensor(side_b)["global_orient"].unsqueeze(0),
+                breakup_tensor(side_b)["transl"].unsqueeze(0),
+            )
+            mesh_renderer.save_mesh_twin_render_gif(
+                fake_verts[0].detach().cpu(),
+                real_verts[0].detach().cpu(),
+                smpl_manager.model.faces,
+                f"gifs//{torch.randint(8000, (1,)).item()}.gif",
+            )
+
+
 
 if __name__ == "__main__":
     main()

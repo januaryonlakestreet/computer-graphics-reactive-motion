@@ -15,7 +15,7 @@ import numpy as np
 import imageio
 import torch
 import os  # Necessary for the robust MeshRenderer class structure
-
+from utils.obects import floor, camera, light
 
 # Ensure to use the robust class structure developed in the previous step
 # as it solves the core pyrender instability.
@@ -62,6 +62,7 @@ class MeshRenderer:
         pose = T @ R if custom_pose is None else custom_pose
         self.scene.add(camera, pose=pose)
 
+        floor(self.scene, "utils\\floor.png")
     def render_frame(self, vertices, faces, color=[0.7, 0.7, 0.7, 1.0]):
         """Renders a single frame and returns the image array."""
         if isinstance(vertices, torch.Tensor):
@@ -78,9 +79,45 @@ class MeshRenderer:
         self.scene.remove_node(node_name)
 
         return color_image
+    def render_three_characters_frame(self, vertices_a, vertices_b,vertices_c, faces,
+                                    color_b=[0.0, 0.0, 1.0, 1.0],  # Blue (A)
+                                    color_a=[1.0, 0.0, 0.0, 1.0],
+                                    color_c=[0.0, 1.0, 0.0, 1.0]):  # Red (B)
+        if isinstance(vertices_a, torch.Tensor):
+            vertices_a = vertices_a.detach().cpu().numpy()
+        if isinstance(vertices_b, torch.Tensor):
+            vertices_b = vertices_b.detach().cpu().numpy()
+        if isinstance(vertices_c, torch.Tensor):
+            vertices_c = vertices_c.detach().cpu().numpy()
+        if isinstance(faces, torch.Tensor):
+            faces = faces.detach().cpu().numpy()
 
-    def render_two_characters_frame(self, vertices_a, vertices_b, faces, color_a=[0.7, 0.7, 0.7, 1.0],
-                                    color_b=[0.3, 0.3, 0.9, 1.0]):
+        mesh_a = trimesh.Trimesh(vertices=vertices_a, faces=faces, process=False)
+        mesh_node_a = pyrender.Mesh.from_trimesh(mesh_a, smooth=True)
+        mesh_node_a.primitives[0].material.baseColorFactor = color_a
+
+        mesh_b = trimesh.Trimesh(vertices=vertices_b, faces=faces, process=False)
+        mesh_node_b = pyrender.Mesh.from_trimesh(mesh_b, smooth=True)
+        mesh_node_b.primitives[0].material.baseColorFactor = color_b
+
+        mesh_c = trimesh.Trimesh(vertices=vertices_c, faces=faces, process=False)
+        mesh_node_c = pyrender.Mesh.from_trimesh(mesh_c, smooth=True)
+        mesh_node_c.primitives[0].material.baseColorFactor = color_c
+
+        node_a = self.scene.add(mesh_node_a)
+        node_b = self.scene.add(mesh_node_b)
+        node_c = self.scene.add(mesh_node_c)
+
+        color_image, _ = self.r.render(self.scene)
+
+        self.scene.remove_node(node_a)
+        self.scene.remove_node(node_b)
+        self.scene.remove_node(node_c)
+
+        return color_image
+    def render_two_characters_frame(self, vertices_a, vertices_b, faces,
+                                    color_a=[0.0, 0.0, 1.0, 1.0],  # Blue (A)
+                                    color_b=[1.0, 0.0, 0.0, 1.0]):  # Red (B)
         if isinstance(vertices_a, torch.Tensor):
             vertices_a = vertices_a.detach().cpu().numpy()
         if isinstance(vertices_b, torch.Tensor):
@@ -111,9 +148,9 @@ class MeshRenderer:
         B = sequence_a.shape[0]
         frames = []
         for frame in range(B):
-            frames.append(self.render_two_characters_frame(sequence_a[frame],sequence_b[frame], faces, color))
+            frames.append(self.render_two_characters_frame(sequence_a[frame],sequence_b[frame], faces))
+        imageio.mimwrite(filename, frames, fps=30,loop=0)
 
-        imageio.mimwrite(filename, frames, fps=15)
 
     def save_mesh_render_gif(self, sequence, faces, filename="mesh.gif", color=[0.7, 0.7, 0.7, 1.0]):
         """Renders an entire sequence and saves it as a GIF."""
@@ -123,6 +160,15 @@ class MeshRenderer:
             frames.append(self.render_frame(sequence[frame], faces, color))
 
         imageio.mimwrite(filename, frames, fps=15)
+
+    def save_mesh_tri_render_gif(self, sequence_a,sequence_b,sequence_c, faces, filename="mesh.gif", color=[0.7, 0.7, 0.7, 1.0]):
+        """Renders an entire sequence and saves it as a GIF."""
+        B = sequence_a.shape[0]
+        frames = []
+        for frame in range(B):
+            frames.append(self.render_three_characters_frame(sequence_a[frame],sequence_b[frame],sequence_c[frame], faces))
+        imageio.mimwrite(filename, frames, fps=30,loop=0)
+
 
     def close(self):
         """Cleans up the OffscreenRenderer resources."""

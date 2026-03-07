@@ -2,3 +2,4 @@
 /vae_motion/smpl
 /vae_motion/saved_models
 *.gif
+/interaction_dataset_files

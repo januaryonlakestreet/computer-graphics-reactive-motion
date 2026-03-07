@@ -9,7 +9,7 @@ parent_dir = os.path.dirname(current_dir)
 os.sys.path.append(parent_dir)
 
 import torch
-
+import torch.nn.functional as F
 import numpy as np
 import matplotlib.pyplot as plt
 from matplotlib.animation import FuncAnimation
@@ -216,90 +216,4 @@ def save_rollout_as_animation(rollout_a, rollout_b, output_path="motion_animatio
 def mean_l2di_(reaction, reaction_gt):
     x = np.mean(np.sqrt(np.sum((reaction - reaction_gt)**2, -1)))
     return x
-
-
-
-
-
-def generate_rollout(vae,start_seq,args):
-    tmp = start_seq(args)
-
-    import numpy as np
-
-
-    sequence = tmp.Get_Interaction()
-    side_a = sequence["side_a"].unsqueeze(dim=1).unsqueeze(dim=1)
-    side_b = sequence["side_b"].unsqueeze(dim=1).unsqueeze(dim=1)
-    frames = side_a.shape[0]
-    side_a = side_a.squeeze()
-    side_b = side_b.squeeze()
-    current = side_a[5].unsqueeze(dim=0).unsqueeze(dim=0)
-    mh =   side_a[:5].unsqueeze(dim=0)
-
-
-    generated_frames = []
-
-    for frame in range(frames):
-        nf, _ = vae(current,mh)
-        generated_frames.append(nf)
-        current = side_a[frame].unsqueeze(dim=0).unsqueeze(dim=0)
-        mh = side_a[frame-5:frame].unsqueeze(dim=0)
-        th = side_b[frame - 5:frame].unsqueeze(dim=0)
-
-    real = torch.cat((sequence["side_a"],sequence["side_b"]),dim=1)
-    fake = torch.cat((sequence["side_a"],torch.stack(generated_frames).squeeze()),dim=1)
-
-
-
-    denormed_real = vae.denormalize(real.unsqueeze(dim=1)).squeeze()
-    denormed_fake = vae.denormalize(fake.unsqueeze(dim=1)).squeeze()
-
-
-
-
-    side_b_start = side_a.shape[1]  # where side_b starts after concat
-    denormed_a = denormed_fake[:,:side_b_start]
-    denormed_side_b = denormed_real[:, :side_b_start]
-    denormed_generated_side_b = denormed_fake[:, side_b_start:]
-
-    frames_real = np.array(denormed_side_b[:,3:69].reshape(-1, 22, 3).detach().cpu())
-    frames_fake = np.array(denormed_generated_side_b[:,3:69].reshape(-1, 22, 3).detach().cpu())
-
-    frame_real_not_generated = np.array(denormed_side_b[:,3:69].reshape(-1, 22, 3).detach().cpu())
-
-
-    save_rollout_as_animation(frame_real_not_generated,frames_fake)
-
-    print("mpjpe",mean_l2di_( np.array(denormed_side_b.detach().cpu()), np.array(denormed_generated_side_b.detach().cpu())))
-    return denormed_a,denormed_generated_side_b
-
-
-
-
-
-def generate_rollout_with_diffusion(vae,diffusion,interaction_dataset):
-    from settings.settings import args
-
-    start_frame = interaction_dataset.GetSingleRandom().unsqueeze(dim=0).unsqueeze(dim=0)
-    num_generated_samples = 1
-    generated_samples = diffusion.sample(shape=(num_generated_samples, 256),pose=start_frame.squeeze())
-
-    mh = []
-
-    mh.append(vae.motion_decoder(generated_samples, start_frame))
-
-    for _ in range(400):
-        pose = vae.motion_decoder(generated_samples,torch.concatenate(mh,dim=1))
-        mh.append(pose)
-        generated_samples = diffusion.sample(shape=(num_generated_samples, 256), pose=start_frame.squeeze())
-
-    data = vae.denormalize(torch.concatenate((torch.concatenate(mh,dim=1).squeeze(),torch.concatenate(mh,dim=1).squeeze()),dim=1).unsqueeze(1)).squeeze()[:,:293]
-    data = np.array(data[:,3:69].reshape(-1,22,3).detach().cpu())
-
-
-    save_rollout_as_animation(data,data)
-
-
-
-
 

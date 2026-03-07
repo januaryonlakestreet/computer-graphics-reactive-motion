@@ -193,11 +193,6 @@ class DartVAE(nn.Module):
 
         self.latent_dim = latent_dim
         self.optim = optim.Adam(list(self.motion_encoder.parameters())+list(self.motion_decoder.parameters()), lr=0.00001)
-        self.mode = normalization.get("mode")
-        self.data_max = normalization.get("max")
-        self.data_min = normalization.get("min")
-        self.data_avg = normalization.get("avg")
-        self.data_std = normalization.get("std")
 
 
 
@@ -229,37 +224,6 @@ class DartVAE(nn.Module):
         reconstructed_motion = self.decode(z,motion_history)
         return reconstructed_motion, results_dict
 
-
-    def normalize(self, t):
-        if self.mode == "minmax":
-            return 2 * (t - self.data_min) / (self.data_max - self.data_min) - 1
-        elif self.mode == "zscore":
-
-            return 2 * (t - self.data_min) / (self.data_max - self.data_min) - 1
-        elif self.mode == "none":
-            return t
-        else:
-            raise ValueError("Unknown normalization mode")
-
-    def denormalize(self, t):
-        if self.mode == "minmax":
-            return (t + 1) * (self.data_max - self.data_min) / 2 + self.data_min
-        elif self.mode == "zscore":
-            side_a_i_labels = t[:,:,223:293]
-            side_b_i_labels =  t[:,:,-70:]
-            t = t * self.data_std + self.data_avg
-
-            t[:, :, 223:293] = side_a_i_labels
-            t[:, :, -70:] = side_b_i_labels
-
-            return  t
-
-
-
-        elif self.mode == "none":
-            return t
-        else:
-            raise ValueError("Unknown normalization mode")
 
 
 
