@@ -1,21 +1,19 @@
 import os
-import torch
+
 import torch.nn.functional as F
 current_dir = os.path.dirname(os.path.realpath(__file__))
 parent_dir = os.path.dirname(current_dir)
 os.sys.path.append(parent_dir)
 import random
-import numpy as np
+
 import torch
-import copy
+
 from get_interaction import Get_Interaction
 from utils.SMPLManager import SMPLManager
 from settings.settings import args
-from utils.maths import quaternion_to_axis_angle,batched_quaternion_to_axis_angle
+
 from utils.mesh_renderer import MeshRenderer
-from model.models import (
-DartVAE,MotionDiscriminator
-)
+from model.models import DartVAE
 import torch.optim as optim
 
 from utils.render import *

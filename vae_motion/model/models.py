@@ -12,9 +12,6 @@ import torch.optim as optim
 
 
 
-from model.Transformer_layer import DecoderTransformerLayer
-
-
 class PositionalEncoding(nn.Module):
     def __init__(self, d_model, dropout=0.1, max_len=5000):
         super(PositionalEncoding, self).__init__()
@@ -69,6 +66,126 @@ class MotionEncoder(nn.Module):
         return mean, log_var
 
 
+
+
+class Self_Attention(nn.Module):
+    def __init__(self, dim, heads, dropout):
+        super().__init__()
+        self.attn = torch.nn.MultiheadAttention(dim, heads, dropout, batch_first=True)
+        self.norm = nn.LayerNorm(dim)
+
+    def forward(self, x, y, z):
+        attn_out, _ = self.attn(x, y, z)
+        return self.norm(x + attn_out)
+
+    def create_causal_mask(self,size):
+        """
+        Creates a causal mask for a transformer.
+
+        Args:
+          size: The size of the sequence.
+
+        Returns:
+          A tensor representing the causal mask.
+        """
+        mask = torch.tril(torch.ones(size, size))
+        return mask.masked_fill(mask == 0, float('-inf')).masked_fill(mask == 1, float(0.0))
+
+
+class Cross_Attention(nn.Module):
+    def __init__(self, dim, heads, dropout):
+        super().__init__()
+        self.attn = torch.nn.MultiheadAttention(dim, heads, dropout, batch_first=True)
+        self.norm = nn.LayerNorm(dim)
+
+    def forward(self, x, y, z):
+        attn_out, _ = self.attn(x, y, z)
+        return self.norm(x + attn_out)
+
+
+    def create_causal_mask(self,size_a,side_b):
+        """
+        Creates a causal mask for a transformer.
+
+        Args:
+          size: The size of the sequence.
+
+        Returns:
+          A tensor representing the causal mask.
+        """
+        mask = torch.tril(torch.ones(size_a, side_b))
+        return mask.masked_fill(mask == 0, float('-inf')).masked_fill(mask == 1, float(0.0))
+
+
+
+
+
+
+    def create_causal_mask(self,size_a,side_b):
+        """
+        Creates a causal mask for a transformer.
+
+        Args:
+          size: The size of the sequence.
+
+        Returns:
+          A tensor representing the causal mask.
+        """
+        mask = torch.tril(torch.ones(size_a, side_b))
+        return mask.masked_fill(mask == 0, float('-inf')).masked_fill(mask == 1, float(0.0))
+
+class FeedForward(nn.Module):
+    def __init__(self, dim,dim_mid, dim_out, dropout, activation):
+        super().__init__()
+
+        self.layer1 = nn.Linear(dim, dim_mid)
+        self.activation = activation
+        self.dropout = nn.Dropout(dropout)
+        self.layer2 = nn.Linear(dim_mid, dim_out)
+
+    def forward(self, x):
+        x = self.layer1(x)
+        x = self.activation(x)
+        x = self.dropout(x)
+        x = self.layer2(x)
+        return x
+
+
+
+
+
+
+
+class DecoderTransformerLayer(nn.Module):
+    def __init__(self, latent_dim,num_heads=4, dropout=0.1, ff_dim=1024):
+
+
+        super().__init__()
+
+        self.self_attn = Self_Attention(latent_dim, num_heads, 0.1)
+        self.cross_attn = Cross_Attention(latent_dim, num_heads, 0.1)
+        self.ffn = FeedForward(latent_dim,ff_dim,latent_dim,dropout,nn.GELU())
+
+        self.final_out = nn.Linear(latent_dim,latent_dim)
+
+        self.layernorm = nn.LayerNorm(1024)
+
+
+
+
+
+    def forward(self, transformer_in,memory):
+        t_in = self.self_attn(transformer_in, transformer_in, transformer_in)
+        transformer_in = self.layernorm(t_in + transformer_in)
+        transformer_in = self.ffn(transformer_in)
+
+        t_in = self.cross_attn(transformer_in, memory, memory)
+        transformer_in = self.layernorm(t_in + transformer_in)
+        transformer_in = self.ffn(transformer_in)
+
+
+        return self.final_out(transformer_in)
+
 class MotionDecoder(nn.Module):
     def __init__(self, latent_dim,  hidden_dim, motion_output_size,
                  num_layers=7, num_heads=4, dropout=0.1, ff_dim=1024,
@@ -117,42 +234,6 @@ class MotionDecoder(nn.Module):
         return self.output_proj(layer_in)
 
 
-
-class MotionDiscriminator(nn.Module):
-    def __init__(self, motion_input_size, hidden_dim, latent_dim, num_layers=7, num_heads=4, dropout=0.1, ff_dim=1024, sequence_length=32):
-        super().__init__()
-        self.motion_proj = nn.Sequential(nn.Linear(motion_input_size, hidden_dim),nn.LayerNorm(hidden_dim))
-        self.pos_encoder = PositionalEncoding(hidden_dim, dropout)
-        encoder_layer = TransformerEncoderLayer(d_model=hidden_dim, nhead=num_heads, dim_feedforward=ff_dim, dropout=dropout, activation='gelu', batch_first=True)
-        self.transformer_encoder = TransformerEncoder(encoder_layer, num_layers=num_layers)
-
-
-        self.mean_proj = nn.Linear(latent_dim, latent_dim*2)
-        self.log_var_proj = nn.Linear(latent_dim, latent_dim*2)
-        self.sequence_length = sequence_length
-
-        self.global_motion_token = nn.Parameter(
-            torch.randn(2, hidden_dim))
-        self.latent_dim = latent_dim
-        self.encoded_motion_to_latent = nn.Linear(hidden_dim,latent_dim)
-        self.hd = hidden_dim
-
-
-    def forward(self, motion_primitive):
-
-        bs = motion_primitive.shape[0]
-        motion_src = self.motion_proj(motion_primitive)
-
-        dist = torch.tile(self.global_motion_token[:, None, :], (1, bs, 1))
-        enc_vector = torch.cat((motion_src,dist.permute(1,0,2)),dim=1)
-
-        motion_encoded = self.transformer_encoder(self.pos_encoder(enc_vector))
-        motion_encoded = self.encoded_motion_to_latent(motion_encoded)
-
-        mean = self.mean_proj(motion_encoded[:,1,:])
-        log_var = self.log_var_proj(motion_encoded[:,2,:])
-
-        return mean, log_var
 
 
 
