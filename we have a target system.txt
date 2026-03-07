@@ -10,6 +10,18 @@ batched inputs
 learn both sides
 learned start token
 mamba history enc
-two pose enc
+two seperate enc + fusion
 diffusion
 text controls
+
+
+
+generated_side_b = pose_vae.start_tokens(torch.ones(1).int().to('cuda')).squeeze()
+            for frame in range(history_length,sequence_length):
+                history = mocap_data["side_a"][frame-history_length:frame,:].unsqueeze(0)
+                history_self = mocap_data["side_b"][frame - history_length:frame, :].unsqueeze(0)
+                new_side_b, _ = pose_vae(history,history_self,torch.ones(1).int().to('cuda'))
+                generated_side_b = torch.vstack((generated_side_b,new_side_b.squeeze().unsqueeze(0)))
+
+            side_a = Get_Interaction(args).denormalize_a(real_side)
+            side_b = Get_Interaction(args).denormalize_b(generated_side_b)

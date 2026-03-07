@@ -76,6 +76,7 @@ def main():
         ).to(args.device)
 
     for ep in range(1, args.num_epochs + 1):
+        pose_vae.train()
         mocap_data = Get_Interaction(args).Get_Interaction()
 
         history_length = 5
@@ -86,20 +87,28 @@ def main():
         pose_vae.optim.zero_grad()
 
         batch_raw_a = mocap_data["side_a"]
-        batch_a = batch_raw_a[sampler].unsqueeze(dim=1)
         target_a = mocap_data["side_b"][sampler].unsqueeze(dim=1)
         batch_history_a = collect_history(sampler, sampler_history, batch_raw_a)
 
         batch_raw_b = mocap_data["side_b"]
-        batch_b = batch_raw_b[sampler].unsqueeze(dim=1)
         target_b = mocap_data["side_a"][sampler].unsqueeze(dim=1)
         batch_history_b = collect_history(sampler, sampler_history, batch_raw_b)
+        bs = batch_history_b.shape[0]
 
-        reconstructed_motion, results_dict = pose_vae(batch_history_a,batch_history_b)
+        role_a = torch.zeros(bs, dtype=torch.long).to(args.device)
+        role_b = torch.ones(bs, dtype=torch.long).to(args.device)
+
+        roles = torch.cat([role_a, role_b], dim=0)
+        histories_self = torch.cat((batch_history_a,batch_history_b),dim=0)
+        histories_other = torch.cat((batch_history_b, batch_history_a), dim=0)
+
+        targets = torch.cat((target_a,target_b),dim=0)
+
+        reconstructed_motion, results_dict = pose_vae(histories_self,histories_other,roles)
 
 
 
-        recon_loss = F.mse_loss(target_a,reconstructed_motion)
+        recon_loss = F.mse_loss(targets,reconstructed_motion)
 
         kl = kl_loss(results_dict["mean"], results_dict["log_var"])
         rollout_loss += recon_loss + kl
@@ -109,19 +118,35 @@ def main():
 
         if ep > 5 and ep % 100 == 0:
             print(f"{ep}    {rollout_loss.item():.6f}")
-
+            pose_vae.eval()
 
             mocap_data =  Get_Interaction(args).Get_Interaction()
             real_side = mocap_data["side_a"]
             sequence_length = real_side.shape[0]
 
             generated_side_b = mocap_data["side_b"][:history_length,:]
+            generated_side_b = pose_vae.start_tokens(torch.ones(1).int().to('cuda')).squeeze()
 
-            for frame in range(history_length,sequence_length):
-                history = mocap_data["side_a"][frame-history_length:frame,:].unsqueeze(0)
-                history_self = mocap_data["side_b"][frame - history_length:frame, :].unsqueeze(0)
-                new_side_b, _ = pose_vae(history,history_self)
-                generated_side_b = torch.vstack((generated_side_b,new_side_b.squeeze().unsqueeze(0)))
+            for frame in range(history_length, sequence_length):
+
+                history = mocap_data["side_a"][frame - history_length:frame, :].unsqueeze(0)
+
+                if generated_side_b.shape[0] < history_length:
+                    pad = mocap_data["side_b"][:history_length - generated_side_b.shape[0]]
+                    history_self = torch.vstack((pad, generated_side_b))[-history_length:]
+                else:
+                    history_self = generated_side_b[-history_length:]
+
+                history_self = history_self.unsqueeze(0)
+
+                new_side_b, _ = pose_vae(
+                    history,
+                    history_self,
+                    torch.ones(1).int().to('cuda')
+                )
+
+                new_frame = new_side_b.squeeze().unsqueeze(0)
+                generated_side_b = torch.vstack((generated_side_b, new_frame))
 
             side_a = Get_Interaction(args).denormalize_a(real_side)
             side_b = Get_Interaction(args).denormalize_b(generated_side_b)
