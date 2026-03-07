@@ -1,0 +1,15 @@
+we have a target system 
+
+go to GitHub version
+copy base project across.
+update to smpl 
+
+test and integrate
+role id
+batched inputs
+learn both sides
+learned start token
+mamba history enc
+two pose enc
+diffusion
+text controls

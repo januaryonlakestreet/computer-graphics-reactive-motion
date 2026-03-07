@@ -95,11 +95,11 @@ def main():
         target_b = mocap_data["side_a"][sampler].unsqueeze(dim=1)
         batch_history_b = collect_history(sampler, sampler_history, batch_raw_b)
 
-        reconstructed_motion, results_dict = pose_vae(batch_history_a)
+        reconstructed_motion, results_dict = pose_vae(batch_history_a,batch_history_b)
 
 
 
-        recon_loss = F.mse_loss(batch_a,reconstructed_motion)
+        recon_loss = F.mse_loss(target_a,reconstructed_motion)
 
         kl = kl_loss(results_dict["mean"], results_dict["log_var"])
         rollout_loss += recon_loss + kl
@@ -115,12 +115,12 @@ def main():
             real_side = mocap_data["side_a"]
             sequence_length = real_side.shape[0]
 
-            generated_side_b = mocap_data["side_a"][:history_length,:]
+            generated_side_b = mocap_data["side_b"][:history_length,:]
 
             for frame in range(history_length,sequence_length):
-                batch = real_side[frame, :].unsqueeze(0).unsqueeze(0)
                 history = mocap_data["side_a"][frame-history_length:frame,:].unsqueeze(0)
-                new_side_b, _ = pose_vae(history)
+                history_self = mocap_data["side_b"][frame - history_length:frame, :].unsqueeze(0)
+                new_side_b, _ = pose_vae(history,history_self)
                 generated_side_b = torch.vstack((generated_side_b,new_side_b.squeeze().unsqueeze(0)))
 
             side_a = Get_Interaction(args).denormalize_a(real_side)

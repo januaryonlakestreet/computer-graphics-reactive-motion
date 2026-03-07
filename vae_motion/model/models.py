@@ -246,7 +246,7 @@ class DartVAE(nn.Module):
 
 
 
-        self.motion_encoder = MotionEncoder(motion_input_size=int(motion_input_size/2),
+        self.motion_encoder = MotionEncoder(motion_input_size=motion_input_size,
                                                hidden_dim=hidden_dim,
                                                latent_dim=int(latent_dim/2),
                                                num_layers=num_layers,
@@ -299,11 +299,13 @@ class DartVAE(nn.Module):
         motion = self.motion_decoder(z,motion_history)
         return motion
 
-    def forward(self,motion_history):
-        current_pose = motion_history[:,-1:,:]
+    def forward(self, other_motion_history, self_motion_history):
+        current_omh_pose = other_motion_history[:,-1:,:]
+        current_smh_pose = other_motion_history[:, -1:, :]
+        current_pose = torch.cat((current_omh_pose,current_smh_pose),dim=2)
         results_dict = self.encode(current_pose)
         z = self.reparameterize(results_dict["mean"], results_dict["log_var"])
-        reconstructed_motion = self.decode(z,motion_history)
+        reconstructed_motion = self.decode(z,other_motion_history)
         return reconstructed_motion, results_dict
 
 
