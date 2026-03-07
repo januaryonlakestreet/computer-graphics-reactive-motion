@@ -34,7 +34,7 @@ class Get_Interaction:
         frame_count = 0
 
         while frame_count < self.args.mini_batch_size:
-            dir = os.path.dirname(os.path.dirname(os.getcwd()))+"\\real_time_dart_2025\\interaction_dataset\\processed\\"
+            dir = os.path.dirname(os.path.dirname(os.getcwd()))+"\\computer & graphics two char motion\\interaction_dataset\\processed\\"
             motion_choice = random.choice(glob.glob(dir + "*.npy")[:1])
             motion_id = motion_choice.split("\\")[-1].split("_")[0]
 
