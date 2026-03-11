@@ -3,3 +3,4 @@
 /vae_motion/saved_models
 *.gif
 /interaction_dataset_files
+/vae_motion/model/__pycache__
