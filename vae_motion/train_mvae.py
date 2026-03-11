@@ -14,7 +14,7 @@ from settings.settings import args
 
 from utils.mesh_renderer import MeshRenderer
 from model.models import DartVAE
-import torch.optim as optim
+
 
 from utils.render import *
 from utils.utils import breakup_tensor
@@ -59,12 +59,6 @@ def main():
     mesh_renderer = MeshRenderer()
     args.num_epochs = 50000
     args.mini_batch_size = 128
-    args.initial_lr = 0.00001
-    args.final_lr = 1e-7
-
-
-
-
 
     frame_size =69 * 2
 
